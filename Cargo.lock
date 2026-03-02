@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "bitflate-rs-macros"
-version = "0.1.87"
+version = "0.1.9"
 dependencies = [
  "proc-macro2",
  "quote",
