@@ -9,7 +9,7 @@ Trying to pack game/input/network flags without guessing at offsets? Want to val
 ```toml
 # Cargo.toml
 [dependencies]
-bitflate-rs = "0.1.85"
+bitflate-rs = "0.1.87"
 bilge = "0.3.0"
 ```
 
@@ -29,7 +29,7 @@ Optional feature
 - `#[podflate]` -> `repr(C)` structs that must be `bytemuck::Pod` + `Zeroable`
 ```toml
 [dependencies]
-bitflate-rs = { version = "0.1.85", features = ["podflate"] }
+bitflate-rs = { version = "0.1.87", features = ["podflate"] }
 ```
 
 ## Examples

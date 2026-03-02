@@ -284,15 +284,18 @@ fn expand_bitflate(mut item: ItemStruct, opts: BitflateOptions) -> proc_macro2::
         let ident = field.ident.clone().expect("named field");
         let ty = field.ty.clone();
         let bits_hint = parse_bits_override(field);
+        let layout_hint = parse_layout_override(field);
         let get_ident = format_ident!("get_{}{}", opts.accessor_prefix, ident);
         let get_mut_ident = format_ident!("get_{}{}_mut", opts.accessor_prefix, ident);
         let set_ident = format_ident!("set_{}{}", opts.accessor_prefix, ident);
-        let field_layout = layout_of_type(&ty).or_else(|| {
-            bits_hint.map(|bits| {
-                let size = bits_to_bytes(bits);
-                (size, size)
-            })
-        });
+        let field_layout = layout_hint
+            .or_else(|| layout_of_type(&ty))
+            .or_else(|| {
+                bits_hint.map(|bits| {
+                    let size = bits_to_bytes(bits);
+                    (size, size)
+                })
+            });
         let type_bits = bits_hint
             .or_else(|| bit_width_of_type(&ty))
             .or_else(|| {
@@ -582,6 +585,7 @@ fn layout_of_type(ty: &Type) -> Option<(usize, usize)> {
                 "u32" | "i32" | "f32" | "char" => (4, 4),
                 "u64" | "i64" | "f64" => (8, 8),
                 "u128" | "i128" => (16, 16),
+                "usize" | "isize" => (core::mem::size_of::<usize>(), core::mem::align_of::<usize>()),
                 _ => (0, 0),
             };
 
@@ -595,6 +599,9 @@ fn layout_of_type(ty: &Type) -> Option<(usize, usize)> {
             }
 
             None
+        }
+        Type::Ptr(_) | Type::Reference(_) => {
+            Some((core::mem::size_of::<usize>(), core::mem::align_of::<usize>()))
         }
         Type::Array(array) => layout_of_array(array),
         _ => None,
@@ -660,6 +667,41 @@ fn parse_bits_override(field: &mut syn::Field) -> Option<usize> {
             .and_then(|lit| lit.base10_parse::<usize>().ok());
         if parsed_here.is_some() {
             parsed = parsed_here;
+        }
+        false
+    });
+    parsed
+}
+
+fn parse_layout_override(field: &mut syn::Field) -> Option<(usize, usize)> {
+    let mut parsed: Option<(usize, usize)> = None;
+    field.attrs.retain(|attr| {
+        if !attr.path().is_ident("layout") {
+            return true;
+        }
+        let metas = attr
+            .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+            .ok();
+        if let Some(metas) = metas {
+            let mut bytes: Option<usize> = None;
+            let mut align: Option<usize> = None;
+            for meta in metas {
+                if let Meta::NameValue(MetaNameValue { path, value, .. }) = meta {
+                    if let Expr::Lit(ExprLit {
+                        lit: Lit::Int(lit), ..
+                    }) = value
+                    {
+                        if path.is_ident("bytes") {
+                            bytes = lit.base10_parse::<usize>().ok();
+                        } else if path.is_ident("align") {
+                            align = lit.base10_parse::<usize>().ok();
+                        }
+                    }
+                }
+            }
+            if let Some(b) = bytes {
+                parsed = Some((b, align.unwrap_or(1)));
+            }
         }
         false
     });
@@ -733,10 +775,12 @@ fn bit_width_of_type(ty: &Type) -> Option<usize> {
                 "u32" | "i32" | "f32" | "char" => Some(32),
                 "u64" | "i64" | "f64" => Some(64),
                 "u128" | "i128" => Some(128),
+                "usize" | "isize" => Some(core::mem::size_of::<usize>() * 8),
                 _ => None,
             };
             primitive_bits.or_else(|| parse_arbitrary_int_bits(&ident))
         }
+        Type::Ptr(_) | Type::Reference(_) => Some(core::mem::size_of::<usize>() * 8),
         Type::Array(array) => {
             let elem_bits = bit_width_of_type(&array.elem)?;
             let Expr::Lit(ExprLit {
