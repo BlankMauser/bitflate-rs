@@ -1,23 +1,20 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use std::cmp::max;
+use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{
-    parse_macro_input, Attribute, Expr, ExprLit, Fields, ItemEnum, ItemStruct, LitInt, LitStr,
-    Meta, Token, Type,
+    parse_macro_input, Attribute, Expr, ExprLit, Fields, ItemEnum, ItemStruct, Lit, LitBool,
+    LitInt, LitStr, Meta, MetaNameValue, Token, Type,
 };
 
 pub fn bitflate(args: TokenStream, input: TokenStream) -> TokenStream {
-    if !args.is_empty() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "#[bitflate] does not accept arguments",
-        )
-        .to_compile_error()
-        .into();
-    }
+    let opts = match parse_bitflate_options(args) {
+        Ok(v) => v,
+        Err(err) => return err.to_compile_error().into(),
+    };
     let item = parse_macro_input!(input as ItemStruct);
-    expand_bitflate(item).into()
+    expand_bitflate(item, opts).into()
 }
 
 pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -159,7 +156,85 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
-fn expand_bitflate(mut item: ItemStruct) -> proc_macro2::TokenStream {
+struct BitflateOptions {
+    generate_accessors: bool,
+    accessor_prefix: String,
+}
+
+impl Default for BitflateOptions {
+    fn default() -> Self {
+        Self {
+            generate_accessors: true,
+            accessor_prefix: String::new(),
+        }
+    }
+}
+
+fn parse_bitflate_options(args: TokenStream) -> syn::Result<BitflateOptions> {
+    let mut opts = BitflateOptions::default();
+    if args.is_empty() {
+        return Ok(opts);
+    }
+    let metas = Punctuated::<Meta, Token![,]>::parse_terminated.parse(args)?;
+    for meta in metas {
+        match meta {
+            Meta::Path(path) if path.is_ident("no_accessors") => {
+                opts.generate_accessors = false;
+            }
+            Meta::NameValue(MetaNameValue { path, value, .. }) if path.is_ident("accessors") => {
+                match value {
+                    Expr::Lit(ExprLit {
+                        lit: Lit::Bool(LitBool { value, .. }),
+                        ..
+                    }) => opts.generate_accessors = value,
+                    Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }) => match s.value().as_str() {
+                        "none" => opts.generate_accessors = false,
+                        "all" | "true" => opts.generate_accessors = true,
+                        _ => {
+                            return Err(syn::Error::new_spanned(
+                                s,
+                                "accessors must be \"all\", \"none\", true, or false",
+                            ))
+                        }
+                    },
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            value,
+                            "accessors must be \"all\", \"none\", true, or false",
+                        ))
+                    }
+                }
+            }
+            Meta::NameValue(MetaNameValue { path, value, .. }) if path.is_ident("prefix") => {
+                let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = value
+                else {
+                    return Err(syn::Error::new_spanned(value, "prefix must be a string"));
+                };
+                let prefix = s.value();
+                if !is_valid_accessor_prefix(&prefix) {
+                    return Err(syn::Error::new_spanned(
+                        s,
+                        "prefix must contain only ASCII letters, digits, or '_'",
+                    ));
+                }
+                opts.accessor_prefix = prefix;
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "supported args: no_accessors, accessors = \"none\" | \"all\", prefix = \"...\"",
+                ))
+            }
+        }
+    }
+    Ok(opts)
+}
+
+fn expand_bitflate(mut item: ItemStruct, opts: BitflateOptions) -> proc_macro2::TokenStream {
     let name = &item.ident;
 
     if !has_repr_c(&item.attrs) {
@@ -209,9 +284,9 @@ fn expand_bitflate(mut item: ItemStruct) -> proc_macro2::TokenStream {
         let ident = field.ident.clone().expect("named field");
         let ty = field.ty.clone();
         let bits_hint = parse_bits_override(field);
-        let get_ident = format_ident!("get_{}", ident);
-        let get_mut_ident = format_ident!("get_{}_mut", ident);
-        let set_ident = format_ident!("set_{}", ident);
+        let get_ident = format_ident!("get_{}{}", opts.accessor_prefix, ident);
+        let get_mut_ident = format_ident!("get_{}{}_mut", opts.accessor_prefix, ident);
+        let set_ident = format_ident!("set_{}{}", opts.accessor_prefix, ident);
         let field_layout = layout_of_type(&ty).or_else(|| {
             bits_hint.map(|bits| {
                 let size = bits_to_bytes(bits);
@@ -459,13 +534,20 @@ fn expand_bitflate(mut item: ItemStruct) -> proc_macro2::TokenStream {
         &format!("bitflate preview\n\n```text\n{}\n```", preview_text),
         proc_macro2::Span::call_site(),
     );
+    let maybe_impl = if opts.generate_accessors {
+        quote! {
+            impl #name {
+                #(#getter_setters)*
+            }
+        }
+    } else {
+        quote! {}
+    };
     quote! {
         #[doc = #preview_doc]
         #item
 
-        impl #name {
-            #(#getter_setters)*
-        }
+        #maybe_impl
 
         const _: () = {
             #(#field_offset_asserts)*
@@ -596,6 +678,12 @@ fn truncate_name(name: &str, width: usize) -> String {
     let mut out: String = name.chars().take(keep).collect();
     out.push_str("..");
     out
+}
+
+fn is_valid_accessor_prefix(prefix: &str) -> bool {
+    prefix
+        .bytes()
+        .all(|b| b == b'_' || b.is_ascii_alphanumeric())
 }
 
 fn parse_arbitrary_int_bits(ident: &str) -> Option<usize> {

@@ -1,6 +1,6 @@
 [package]
 name = "bitflate-rs"
-version = "0.1.82"
+version = "0.1.84"
 edition = "2021"
 author = "BlankMauser"
 license = "MIT"
