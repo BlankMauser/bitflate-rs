@@ -50,8 +50,6 @@ struct PacketHeader {
 }
 ```
 
-`#[bitflate]` already includes the byte map preview.
-
 ### 2) Packed bits (common use case)
 
 ```rust
