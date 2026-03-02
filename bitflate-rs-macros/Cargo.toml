@@ -2,6 +2,9 @@
 name = "bitflate-rs-macros"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "Proc-macros for bitflate-rs"
+readme = "../README.md"
 
 [lib]
 proc-macro = true

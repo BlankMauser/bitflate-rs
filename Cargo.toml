@@ -2,6 +2,10 @@
 name = "bitflate-rs"
 version = "0.1.0"
 edition = "2021"
+author = "BlankMauser"
+license = "MIT"
+description = "Layout/bitfield helpers for previewing structs"
+readme = "README.md"
 
 [workspace]
 members = ["bitflate-rs-macros"]
