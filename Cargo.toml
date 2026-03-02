@@ -17,6 +17,6 @@ bilge = ["dep:bilge"]
 podflate = ["dep:bytemuck"]
 
 [dependencies]
-bilge = { path = "crates/bilge", optional = true }
+bilge = { path = "crates/bilge", optional = true, version = "0.3.0" }
 bytemuck = { version = "1.18.0", features = ["derive"], optional = true }
 bitflate-rs-macros = { path = "bitflate-rs-macros", version = "0.1.0" }
