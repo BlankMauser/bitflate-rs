@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use std::cmp::max;
 use syn::punctuated::Punctuated;
@@ -11,6 +12,16 @@ use syn::{
 enum PreviewMode {
     Compact,
     Full,
+}
+
+fn bitflate_crate_path() -> proc_macro2::TokenStream {
+    match crate_name("bitflate-rs") {
+        Ok(FoundCrate::Name(name)) => {
+            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
+            quote!(::#ident)
+        }
+        Ok(FoundCrate::Itself) | Err(_) => quote!(::bitflate_rs),
+    }
 }
 
 pub fn bitflate(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -39,6 +50,7 @@ fn parse_bitflate_mode(args: TokenStream) -> Result<PreviewMode, syn::Error> {
 }
 
 pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
+    let crate_path = bitflate_crate_path();
     let bits_lit = parse_macro_input!(args as LitInt);
     let total_bits = match bits_lit.base10_parse::<usize>() {
         Ok(v) => v,
@@ -102,17 +114,18 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
     );
     quote! {
         #[doc = #preview_doc]
-        #[::bitflate_rs::bilge::bitsize(#bits_lit)]
+        #[#crate_path::bilge::bitsize(#bits_lit)]
         #item
 
         const _: () = {
-            assert!(<#name as ::bitflate_rs::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as #crate_path::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
 }
 
 pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
+    let crate_path = bitflate_crate_path();
     let bits_lit = parse_macro_input!(args as LitInt);
     let total_bits = match bits_lit.base10_parse::<usize>() {
         Ok(v) => v,
@@ -130,7 +143,7 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
     let maybe_derive = if has_from_bits {
         quote! {}
     } else {
-        quote! { #[derive(::bitflate_rs::bilge::FromBits)] }
+        quote! { #[derive(#crate_path::bilge::FromBits)] }
     };
 
     let mut preview_lines = Vec::new();
@@ -164,12 +177,12 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
 
     quote! {
         #[doc = #preview_doc]
-        #[::bitflate_rs::bilge::bitsize(#bits_lit)]
+        #[#crate_path::bilge::bitsize(#bits_lit)]
         #maybe_derive
         #item
 
         const _: () = {
-            assert!(<#name as ::bitflate_rs::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as #crate_path::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
