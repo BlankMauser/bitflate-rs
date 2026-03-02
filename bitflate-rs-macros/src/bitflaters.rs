@@ -102,11 +102,11 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
     );
     quote! {
         #[doc = #preview_doc]
-        #[::bilge::bitsize(#bits_lit)]
+        #[::bitflate_rs::bilge::bitsize(#bits_lit)]
         #item
 
         const _: () = {
-            assert!(<#name as ::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as ::bitflate_rs::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
@@ -130,7 +130,7 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
     let maybe_derive = if has_from_bits {
         quote! {}
     } else {
-        quote! { #[derive(::bilge::FromBits)] }
+        quote! { #[derive(::bitflate_rs::bilge::FromBits)] }
     };
 
     let mut preview_lines = Vec::new();
@@ -164,12 +164,12 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
 
     quote! {
         #[doc = #preview_doc]
-        #[::bilge::bitsize(#bits_lit)]
+        #[::bitflate_rs::bilge::bitsize(#bits_lit)]
         #maybe_derive
         #item
 
         const _: () = {
-            assert!(<#name as ::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as ::bitflate_rs::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
