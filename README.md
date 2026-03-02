@@ -9,7 +9,7 @@ Trying to pack game/input/network flags without guessing at offsets? Want to val
 ```toml
 # Cargo.toml
 [dependencies]
-bitflate-rs = "0.1.7"
+bitflate-rs = "0.1.8"
 bilge = "0.3.0"
 ```
 
@@ -17,7 +17,7 @@ bilge = "0.3.0"
 // Using bitflate-rs
 use bitflate_rs::prelude::*;
 ```
-`bilge` is required in your crate if you use bitflate-bits/enums. 
+`bilge` is required in your crate if you use `bitflate_bits` / `bitflate_enum`.
 
 ## Macros
 
@@ -29,7 +29,7 @@ Optional feature
 - `#[podflate]` -> `repr(C)` structs that must be `bytemuck::Pod` + `Zeroable`
 ```toml
 [dependencies]
-bitflate-rs = { version = "0.1.7", features = ["podflate"] }
+bitflate-rs = { version = "0.1.8", features = ["podflate"] }
 ```
 
 ## Examples
@@ -50,7 +50,7 @@ struct PacketHeader {
 }
 ```
 
-Use `#[bitflate(full)]` for larger previews.
+`#[bitflate]` already includes the byte map preview.
 
 ### 2) Packed bits (common use case)
 
@@ -83,6 +83,8 @@ struct PackedHeader {
 ## Notes
 
 - If you want **less codegen**, do not derive `TryFromBits` unless you need fallible parsing.
+- `FromBits` does not require deriving `TryFromBits`.
+- If bilge expansion asks for `TryFrom` in scope, `use bitflate_rs::prelude::*;` already brings it in.
 - For nested packed fields, add `#[bits(N)]` so preview/validation can compute widths.
 
 ## Examples and Tests

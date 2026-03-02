@@ -1,6 +1,6 @@
 [package]
 name = "bitflate-rs-macros"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 license = "MIT"
 description = "Proc-macros for bitflate-rs"

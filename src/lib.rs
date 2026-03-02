@@ -25,4 +25,5 @@ pub mod prelude {
     pub use crate::podflate;
     #[cfg(feature = "bilge")]
     pub use bilge::prelude::*;
+    pub use core::convert::TryFrom;
 }
