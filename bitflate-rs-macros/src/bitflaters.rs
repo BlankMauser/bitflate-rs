@@ -38,9 +38,14 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
         _ => {
             return syn::Error::new_spanned(item, "#[bitflate_bits] only supports named structs")
                 .to_compile_error()
-                .into()
+            .into()
         }
     };
+    for field in fields.iter_mut() {
+        if matches!(field.vis, syn::Visibility::Inherited) {
+            field.vis = syn::parse_quote!(pub);
+        }
+    }
 
     let mut preview_lines = Vec::new();
     preview_lines.push(format!("Bit layout for {} (packed)", name));
