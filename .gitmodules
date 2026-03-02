@@ -1,0 +1,3 @@
+[submodule "crates/bilge"]
+	path = crates/bilge
+	url = https://github.com/hecatia-elegua/bilge.git

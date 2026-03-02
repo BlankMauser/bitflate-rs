@@ -1,5 +1,6 @@
 extern crate self as bitflate_rs;
 
+#[cfg(feature = "bilge")]
 pub use bilge;
 pub use bitflate_rs_macros::bitflate;
 pub use bitflate_rs_macros::bitflate_bits;
@@ -22,5 +23,6 @@ pub mod prelude {
     pub use crate::{bitflate, bitflate_bits, bitflate_enum};
     #[cfg(feature = "podflate")]
     pub use crate::podflate;
+    #[cfg(feature = "bilge")]
     pub use bilge::prelude::*;
 }

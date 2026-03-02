@@ -11,8 +11,6 @@ checksum = "993a810118f8f37e9c4411c86f1c4c940a09a7ab34b7bf2d88d06f50c553fab7"
 [[package]]
 name = "bilge"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "279c74986684d5cc7bbbd079aa448e8f852992cd385d85bb3a37e374c087b065"
 dependencies = [
  "arbitrary-int",
  "bilge-impl",
@@ -21,8 +19,6 @@ dependencies = [
 [[package]]
 name = "bilge-impl"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1176e49f42fe135cd2b56465e4f7d07038d3728f5e9f27fb2f08ed3fef75339"
 dependencies = [
  "itertools",
  "proc-macro-error2",
@@ -33,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "bitflate-rs"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "bilge",
  "bitflate-rs-macros",
@@ -42,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "bitflate-rs-macros"
-version = "0.1.1"
+version = "0.1.4"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",

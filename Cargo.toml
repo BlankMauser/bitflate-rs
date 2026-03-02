@@ -1,6 +1,6 @@
 [package]
 name = "bitflate-rs"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 author = "BlankMauser"
 license = "MIT"
@@ -9,12 +9,14 @@ readme = "README.md"
 
 [workspace]
 members = ["bitflate-rs-macros"]
+exclude = ["crates/bilge"]
 
 [features]
-default = []
+default = ["bilge"]
+bilge = ["dep:bilge"]
 podflate = ["dep:bytemuck"]
 
 [dependencies]
-bilge = "0.3.0"
+bilge = { path = "crates/bilge", optional = true }
 bytemuck = { version = "1.18.0", features = ["derive"], optional = true }
 bitflate-rs-macros = { path = "bitflate-rs-macros", version = "0.1.0" }

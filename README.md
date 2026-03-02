@@ -17,6 +17,15 @@ bitflate-rs = "0.1"
 use bitflate_rs::prelude::*;
 ```
 
+`bitflate-rs` enables a vendored `bilge` by default (feature `bilge`).
+If you want to use your own `bilge` dependency, disable default features:
+
+```toml
+[dependencies]
+bitflate-rs = { version = "0.1", default-features = false }
+bilge = "0.3"
+```
+
 ## Macros
 
 - `#[bitflate]` -> Automagically computes bit layout and padding for repr(C)
