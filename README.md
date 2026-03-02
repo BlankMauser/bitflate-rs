@@ -9,22 +9,15 @@ Trying to pack game/input/network flags without guessing at offsets? Want to val
 ```toml
 # Cargo.toml
 [dependencies]
-bitflate-rs = "0.1"
+bitflate-rs = "0.1.7"
+bilge = "0.3.0"
 ```
 
 ```rust
 // Using bitflate-rs
 use bitflate_rs::prelude::*;
 ```
-
-`bitflate-rs` enables a vendored `bilge` by default (feature `bilge`).
-If you want to use your own `bilge` dependency, disable default features:
-
-```toml
-[dependencies]
-bitflate-rs = { version = "0.1", default-features = false }
-bilge = "0.3"
-```
+`bilge` is required in your crate if you use bitflate-bits/enums. 
 
 ## Macros
 
@@ -36,7 +29,7 @@ Optional feature
 - `#[podflate]` -> `repr(C)` structs that must be `bytemuck::Pod` + `Zeroable`
 ```toml
 [dependencies]
-bitflate-rs = { version = "0.1", features = ["podflate"] }
+bitflate-rs = { version = "0.1.7", features = ["podflate"] }
 ```
 
 ## Examples

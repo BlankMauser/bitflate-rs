@@ -9,6 +9,15 @@ struct PacketHeader {
     checksum: u32,
 }
 
+#[bitflate]
+#[repr(C)]
+struct PartialBits {
+    a: u8,
+    #[bits(3)]
+    tiny: u8,
+    b: u16,
+}
+
 fn main() {
     let mut header = PacketHeader {
         tag: 0xAB,
@@ -28,4 +37,5 @@ fn main() {
         header.get_checksum(),
     );
     println!("size={} bytes", core::mem::size_of::<PacketHeader>());
+    let _partial = PartialBits { a: 1, tiny: 5, b: 2 };
 }

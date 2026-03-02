@@ -1,5 +1,4 @@
 use proc_macro::TokenStream;
-use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use std::cmp::max;
 use syn::punctuated::Punctuated;
@@ -8,49 +7,20 @@ use syn::{
     Meta, Token, Type,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PreviewMode {
-    Compact,
-    Full,
-}
-
-fn bitflate_crate_path() -> proc_macro2::TokenStream {
-    match crate_name("bitflate-rs") {
-        Ok(FoundCrate::Name(name)) => {
-            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            quote!(::#ident)
-        }
-        Ok(FoundCrate::Itself) | Err(_) => quote!(::bitflate_rs),
-    }
-}
-
 pub fn bitflate(args: TokenStream, input: TokenStream) -> TokenStream {
-    let mode = match parse_bitflate_mode(args) {
-        Ok(mode) => mode,
-        Err(err) => return err.to_compile_error().into(),
-    };
-
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[bitflate] does not accept arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
     let item = parse_macro_input!(input as ItemStruct);
-    expand_bitflate(item, mode).into()
-}
-
-fn parse_bitflate_mode(args: TokenStream) -> Result<PreviewMode, syn::Error> {
-    if args.is_empty() {
-        return Ok(PreviewMode::Compact);
-    }
-    let mode = syn::parse::<syn::Ident>(args)?;
-    if mode == "full" {
-        Ok(PreviewMode::Full)
-    } else {
-        Err(syn::Error::new_spanned(
-            mode,
-            "expected #[bitflate] or #[bitflate(full)]",
-        ))
-    }
+    expand_bitflate(item).into()
 }
 
 pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
-    let crate_path = bitflate_crate_path();
     let bits_lit = parse_macro_input!(args as LitInt);
     let total_bits = match bits_lit.base10_parse::<usize>() {
         Ok(v) => v,
@@ -96,13 +66,10 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
         };
         let start = cursor;
         let end = cursor + bits - 1;
+        let name_str = truncate_name(&ident.to_string(), 16);
+        let ty_str = truncate_name(&quote!(#ty).to_string(), 12);
         preview_lines.push(format!(
-            "- {:>12} : {:<20} bits [{:>4}..={:<4}] width {}",
-            ident,
-            quote!(#ty),
-            start,
-            end,
-            bits
+            "- [{start}..,{end}] {name_str}: {ty_str} {bits} bits"
         ));
         cursor += bits;
     }
@@ -114,18 +81,17 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
     );
     quote! {
         #[doc = #preview_doc]
-        #[#crate_path::bilge::bitsize(#bits_lit)]
+        #[::bilge::bitsize(#bits_lit)]
         #item
 
         const _: () = {
-            assert!(<#name as #crate_path::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as ::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
 }
 
 pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
-    let crate_path = bitflate_crate_path();
     let bits_lit = parse_macro_input!(args as LitInt);
     let total_bits = match bits_lit.base10_parse::<usize>() {
         Ok(v) => v,
@@ -143,7 +109,7 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
     let maybe_derive = if has_from_bits {
         quote! {}
     } else {
-        quote! { #[derive(#crate_path::bilge::FromBits)] }
+        quote! { #[derive(::bilge::FromBits)] }
     };
 
     let mut preview_lines = Vec::new();
@@ -166,7 +132,7 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
             next_discriminant = next_discriminant.saturating_add(1);
             format!("{current}")
         };
-        preview_lines.push(format!("- {:<20} = {}", variant_name, display_value));
+        preview_lines.push(format!("- {variant_name} = {display_value}"));
     }
 
     let preview_text = preview_lines.join("\n");
@@ -177,18 +143,18 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
 
     quote! {
         #[doc = #preview_doc]
-        #[#crate_path::bilge::bitsize(#bits_lit)]
+        #[::bilge::bitsize(#bits_lit)]
         #maybe_derive
         #item
 
         const _: () = {
-            assert!(<#name as #crate_path::bilge::Bitsized>::BITS == #total_bits);
+            assert!(<#name as ::bilge::Bitsized>::BITS == #total_bits);
         };
     }
     .into()
 }
 
-fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::TokenStream {
+fn expand_bitflate(mut item: ItemStruct) -> proc_macro2::TokenStream {
     let name = &item.ident;
 
     if !has_repr_c(&item.attrs) {
@@ -211,8 +177,23 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
     let mut getter_setters = Vec::new();
     let mut cursor_updates = Vec::new();
     let mut field_offset_asserts = Vec::new();
-    let mut segment_rows = Vec::new();
+    struct Row {
+        start: usize,
+        end: usize,
+        name: String,
+        ty: String,
+        bytes: usize,
+        bits_opt: Option<usize>,
+        bit_start: usize,
+        bit_end: usize,
+        padding: bool,
+        unsupported: bool,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
     let mut byte_owners: Vec<String> = Vec::new();
+    let mut byte_types: Vec<String> = Vec::new();
+    let mut byte_partial: Vec<bool> = Vec::new();
     let mut cursor = 0usize;
     let mut struct_align = 1usize;
     let mut used_bytes = 0usize;
@@ -232,6 +213,15 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
                 (size, size)
             })
         });
+        let type_bits = bits_hint
+            .or_else(|| bit_width_of_type(&ty))
+            .or_else(|| {
+                if matches!(ty, syn::Type::Path(ref p) if p.path.is_ident("bool")) {
+                    Some(1)
+                } else {
+                    None
+                }
+            });
 
         if let Some((field_size, field_align)) = field_layout {
             let aligned_offset = align_up_host(cursor, field_align);
@@ -240,37 +230,50 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
                 let pad_start = cursor;
                 let pad_len = aligned_offset - cursor;
                 let pad_end = aligned_offset - 1;
-                segment_rows.push(format!(
-                    "- [{:>3}..={:<3}] {:<14} {:>3} bytes ({:>4}..={:<4} bits)",
-                    pad_start,
-                    pad_end,
-                    "<padding/free>",
-                    pad_len,
-                    pad_start * 8,
-                    (pad_end * 8) + 7
-                ));
+                rows.push(Row {
+                    start: pad_start,
+                    end: pad_end,
+                    name: "<padding/free>".to_string(),
+                    ty: String::new(),
+                    bytes: pad_len,
+                    bits_opt: None,
+                    bit_start: 0,
+                    bit_end: 0,
+                    padding: true,
+                    unsupported: false,
+                });
                 for _ in 0..(aligned_offset - cursor) {
                     byte_owners.push("<padding>".to_string());
+                    byte_types.push(String::new());
+                    byte_partial.push(false);
                 }
             }
 
             for _ in 0..field_size {
                 byte_owners.push(ident.to_string());
+                byte_types.push(quote!(#ty).to_string());
+                let partial = type_bits.map(|b| b < field_size * 8).unwrap_or(false);
+                byte_partial.push(partial);
             }
 
+            let name_str = truncate_name(&ident.to_string(), 16);
+            let ty_str = truncate_name(&quote!(#ty).to_string(), 12);
+            let end = aligned_offset + field_size.saturating_sub(1);
+            let bits_opt = type_bits.and_then(|b| if b < field_size * 8 { Some(b) } else { None });
             let bit_start = aligned_offset * 8;
-            let bit_end = bit_start + (field_size * 8).saturating_sub(1);
-            segment_rows.push(format!(
-                "- [{:>3}..={:<3}] {:<14} {:>3} bytes ({:>4}..={:<4} bits)  type {:<12} align {}",
-                aligned_offset,
-                aligned_offset + field_size.saturating_sub(1),
-                ident,
-                field_size,
+            let bit_end = bits_opt.map(|b| bit_start + b - 1).unwrap_or(0);
+            rows.push(Row {
+                start: aligned_offset,
+                end,
+                name: name_str,
+                ty: ty_str,
+                bytes: field_size,
+                bits_opt,
                 bit_start,
                 bit_end,
-                quote!(#ty),
-                field_align
-            ));
+                padding: false,
+                unsupported: false,
+            });
 
             if exact_offset_asserts {
                 field_offset_asserts.push(quote! {
@@ -288,11 +291,19 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
         } else {
             preview_supported = false;
             exact_offset_asserts = false;
-            segment_rows.push(format!(
-                "- {:>12} : {:<12} <layout preview unavailable for this field type>",
-                ident,
-                quote!(#ty),
-            ));
+            let name_str = truncate_name(&ident.to_string(), 16);
+            rows.push(Row {
+                start: 0,
+                end: 0,
+                name: name_str,
+                ty: String::new(),
+                bytes: 0,
+                bits_opt: None,
+                bit_start: 0,
+                bit_end: 0,
+                padding: false,
+                unsupported: true,
+            });
             field_offset_asserts.push(quote! {
                 let _ = core::mem::offset_of!(#name, #ident);
             });
@@ -321,23 +332,27 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
         });
     }
 
-    if preview_supported {
+    let preview_lines = if preview_supported {
         let computed_size = align_up_host(cursor, struct_align);
         if computed_size > cursor {
             let pad_start = cursor;
             let pad_len = computed_size - cursor;
             let pad_end = computed_size - 1;
-            segment_rows.push(format!(
-                "- [{:>3}..={:<3}] {:<14} {:>3} bytes ({:>4}..={:<4} bits)",
-                pad_start,
-                pad_end,
-                "<padding/free>",
-                pad_len,
-                pad_start * 8,
-                (pad_end * 8) + 7
-            ));
+            rows.push(Row {
+                start: pad_start,
+                end: pad_end,
+                name: "<padding/free>".to_string(),
+                ty: String::new(),
+                bytes: pad_len,
+                bits_opt: None,
+                bit_start: 0,
+                bit_end: 0,
+                padding: true,
+                unsupported: false,
+            });
             for _ in 0..(computed_size - cursor) {
                 byte_owners.push("<padding>".to_string());
+                byte_types.push(String::new());
             }
         }
         let free_bytes = computed_size.saturating_sub(used_bytes);
@@ -355,32 +370,86 @@ fn expand_bitflate(mut item: ItemStruct, mode: PreviewMode) -> proc_macro2::Toke
             used_bytes, free_bytes
         ));
         ascii_layout.push_str("Layout map (in memory order):\n");
-        for row in &segment_rows {
-            ascii_layout.push_str(row);
-            ascii_layout.push('\n');
+        let max_index = computed_size.saturating_sub(1);
+        let idx_width = max_index.to_string().len().max(1);
+        let bytes_width = computed_size.to_string().len().max(1);
+        for row in &rows {
+            if row.unsupported {
+                ascii_layout.push_str(&format!(
+                    "- {:<16} <layout preview unavailable>\n",
+                    row.name
+                ));
+                continue;
+            }
+            let range = format!(
+                "[{:>w$}..,{:>w$}]",
+                row.start,
+                row.end,
+                w = idx_width
+            );
+            let name_part = if row.padding {
+                row.name.clone()
+            } else if row.ty.is_empty() {
+                row.name.clone()
+            } else {
+                format!("{}: {}", row.name, row.ty)
+            };
+            let bits_suffix = row
+                .bits_opt
+                .map(|_| {
+                    format!(
+                        "  [{:>bw$}..,{:>bw$}]",
+                        row.bit_start,
+                        row.bit_end,
+                        bw = idx_width + 2
+                    )
+                })
+                .unwrap_or_default();
+            ascii_layout.push_str(&format!(
+                "- {range} {:<20} {:>bw$} bytes{bits_suffix}\n",
+                name_part,
+                row.bytes,
+                bw = bytes_width
+            ));
         }
-        if mode == PreviewMode::Full {
-            ascii_layout.push_str("\nByte map:\n");
-            for (idx, owner) in byte_owners.iter().enumerate() {
-                ascii_layout.push_str(&format!("{:>3}: {}\n", idx, owner));
+        ascii_layout.push_str("\nByte map:\n");
+        for (idx, owner) in byte_owners.iter().enumerate() {
+            let mark = if *byte_partial.get(idx).unwrap_or(&false) {
+                "*"
+            } else {
+                ""
+            };
+            let ty = byte_types.get(idx).map(|s| s.as_str()).unwrap_or("");
+            if ty.is_empty() {
+                ascii_layout.push_str(&format!("{idx}: {owner}{mark}\n"));
+            } else {
+                ascii_layout.push_str(&format!("{idx}: {owner}{mark}: {ty}\n"));
             }
         }
-        segment_rows = ascii_layout
+        ascii_layout.push_str("* = Free Bits\n");
+        ascii_layout
             .lines()
             .map(|line| line.to_string())
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
     } else {
-        let mut lines = vec![
+        let mut preview_lines = vec![
             format!("Layout for {} (repr(C))", name),
             "preview: unsupported field type for static visualization".to_string(),
             "hint: add #[bits(N)] on nested/packed fields to provide width".to_string(),
             String::new(),
             "Layout map:".to_string(),
         ];
-        lines.extend(segment_rows);
-        segment_rows = lines;
-    }
-    let preview_text = segment_rows.join("\n");
+        for row in &rows {
+            if row.unsupported {
+                preview_lines.push(format!(
+                    "- {:<16} <layout preview unavailable>",
+                    row.name
+                ));
+            }
+        }
+        preview_lines
+    };
+    let preview_text = preview_lines.join("\n");
     let preview_doc = LitStr::new(
         &format!("bitflate preview\n\n```text\n{}\n```", preview_text),
         proc_macro2::Span::call_site(),
@@ -508,6 +577,20 @@ fn parse_bits_override(field: &mut syn::Field) -> Option<usize> {
         false
     });
     parsed
+}
+
+fn truncate_name(name: &str, width: usize) -> String {
+    if width <= 2 {
+        return name.chars().take(width).collect();
+    }
+    let count = name.chars().count();
+    if count <= width {
+        return name.to_string();
+    }
+    let keep = width - 2;
+    let mut out: String = name.chars().take(keep).collect();
+    out.push_str("..");
+    out
 }
 
 fn parse_arbitrary_int_bits(ident: &str) -> Option<usize> {

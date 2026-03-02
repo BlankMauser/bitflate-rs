@@ -43,13 +43,15 @@ struct InputProfile {
     sensitivity: u8,
 }
 
-#[bitflate(full)]
+#[bitflate]
 #[repr(C)]
 struct ProfileBlob {
     magic: u16,
     version: u8,
     #[bits(32)]
     packed: InputProfile,
+    #[bits(4)]
+    nibble: u8,
     checksum: u16,
 }
 
@@ -66,6 +68,7 @@ fn main() {
         magic: 0xB17F,
         version: 3,
         packed: profile,
+        nibble: 7,
         checksum: 0xAA55,
     };
 

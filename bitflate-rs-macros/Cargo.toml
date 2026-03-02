@@ -1,6 +1,6 @@
 [package]
 name = "bitflate-rs-macros"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "MIT"
 description = "Proc-macros for bitflate-rs"
@@ -11,6 +11,5 @@ proc-macro = true
 
 [dependencies]
 proc-macro2 = "1"
-proc-macro-crate = "3"
 quote = "1"
 syn = { version = "2", features = ["full"] }

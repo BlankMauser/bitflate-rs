@@ -9,7 +9,6 @@ readme = "README.md"
 
 [workspace]
 members = ["bitflate-rs-macros"]
-exclude = ["crates/bilge"]
 
 [features]
 default = ["bilge"]
@@ -17,6 +16,6 @@ bilge = ["dep:bilge"]
 podflate = ["dep:bytemuck"]
 
 [dependencies]
-bilge = { path = "crates/bilge", optional = true, version = "0.3.0" }
+bilge = { version = "0.3.0", optional = true }
 bytemuck = { version = "1.18.0", features = ["derive"], optional = true }
 bitflate-rs-macros = { path = "bitflate-rs-macros", version = "0.1.4" }
