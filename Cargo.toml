@@ -13,4 +13,4 @@ podflate = ["dep:bytemuck"]
 [dependencies]
 bilge = "0.3.0"
 bytemuck = { version = "1.18.0", features = ["derive"], optional = true }
-bitflate-rs-macros = { path = "bitflate-rs-macros" }
+bitflate-rs-macros = { path = "bitflate-rs-macros", version = "0.1.0" }
