@@ -1,0 +1,16 @@
+[package]
+name = "bitflate-rs"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["bitflate-rs-macros"]
+
+[features]
+default = []
+podflate = ["dep:bytemuck"]
+
+[dependencies]
+bilge = "0.3.0"
+bytemuck = { version = "1.18.0", features = ["derive"], optional = true }
+bitflate-rs-macros = { path = "bitflate-rs-macros" }
