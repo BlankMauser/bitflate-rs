@@ -44,12 +44,15 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
-    let mut preview_lines = Vec::new();
-    preview_lines.push(format!("Bit layout for {} (packed)", name));
-    preview_lines.push(format!("declared bits: {}", total_bits));
-    preview_lines.push(String::new());
-    preview_lines.push("Fields:".to_string());
-
+    struct BitRow {
+        start: usize,
+        end: usize,
+        label: String,
+        width: usize,
+        name: String,
+        ty: String,
+    }
+    let mut rows: Vec<BitRow> = Vec::new();
     let mut cursor = 0usize;
     for field in fields.iter_mut() {
         let ident = field.ident.clone().expect("named field");
@@ -70,11 +73,51 @@ pub fn bitflate_bits(args: TokenStream, input: TokenStream) -> TokenStream {
         let end = cursor + bits - 1;
         let name_str = truncate_name(&ident.to_string(), 16);
         let ty_str = truncate_name(&quote!(#ty).to_string(), 12);
-        preview_lines.push(format!(
-            "- [{start}..,{end}] {name_str}: {ty_str} {bits} bits"
-        ));
+        rows.push(BitRow {
+            start,
+            end,
+            label: format!("{name_str}: {ty_str}"),
+            width: bits,
+            name: name_str,
+            ty: ty_str,
+        });
         cursor += bits;
     }
+
+    let mut preview_lines = Vec::new();
+    preview_lines.push(format!("Layout for {} (packed bits)", name));
+    preview_lines.push(format!("size: {} b", total_bits));
+    preview_lines.push(format!(
+        "bytes: {} by, free bits: {}",
+        total_bits.div_ceil(8),
+        total_bits.div_ceil(8) * 8 - total_bits
+    ));
+    preview_lines.push(String::new());
+    preview_lines.push("Layout map (in bit order):".to_string());
+    let map_rows: Vec<LayoutLine> = rows
+        .iter()
+        .map(|row| LayoutLine {
+            range: format!("[{}..,{}]", row.start, row.end),
+            label: row.label.clone(),
+            count: row.width,
+            unit: "b".to_string(),
+            suffix: String::new(),
+        })
+        .collect();
+    preview_lines.extend(render_layout_lines(&map_rows));
+    preview_lines.push(String::new());
+    preview_lines.push("Byte map:".to_string());
+    let segments: Vec<BitSegment> = rows
+        .iter()
+        .map(|row| BitSegment {
+            name: row.name.clone(),
+            ty: row.ty.clone(),
+            start: row.start,
+            end: row.end,
+        })
+        .collect();
+    preview_lines.extend(render_packed_byte_map(total_bits, &segments));
+    preview_lines.push("* = Free Bits".to_string());
 
     let preview_text = preview_lines.join("\n");
     let preview_doc = LitStr::new(
@@ -114,10 +157,7 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { #[derive(::bilge::FromBits)] }
     };
 
-    let mut preview_lines = Vec::new();
-    preview_lines.push(format!("Enum layout for {} ({} bits)", name, total_bits));
-    preview_lines.push(String::new());
-    preview_lines.push("Variants:".to_string());
+    let mut variants: Vec<(String, String)> = Vec::new();
 
     let mut next_discriminant = 0usize;
     for variant in &item.variants {
@@ -134,8 +174,50 @@ pub fn bitflate_enum(args: TokenStream, input: TokenStream) -> TokenStream {
             next_discriminant = next_discriminant.saturating_add(1);
             format!("{current}")
         };
-        preview_lines.push(format!("- {variant_name} = {display_value}"));
+        variants.push((variant_name, display_value));
     }
+
+    let mut preview_lines = Vec::new();
+    preview_lines.push(format!("Layout for {} (packed enum)", name));
+    preview_lines.push(format!("size: {} b", total_bits));
+    preview_lines.push(format!(
+        "bytes: {} by, free bits: {}",
+        total_bits.div_ceil(8),
+        total_bits.div_ceil(8) * 8 - total_bits
+    ));
+    preview_lines.push(String::new());
+    preview_lines.push("Layout map (variant encoding):".to_string());
+    let bit_range = format!("[0..,{}]", total_bits.saturating_sub(1));
+    let label_width = variants
+        .iter()
+        .map(|(name, _)| name.len())
+        .max()
+        .unwrap_or(1);
+    let value_width = variants
+        .iter()
+        .map(|(_, value)| value.len())
+        .max()
+        .unwrap_or(1);
+    for (variant_name, display_value) in variants {
+        preview_lines.push(format!(
+            "- {range}  {name:<nw$}  = {value:>vw$}",
+            range = bit_range,
+            name = variant_name,
+            value = display_value,
+            nw = label_width,
+            vw = value_width
+        ));
+    }
+    preview_lines.push(String::new());
+    preview_lines.push("Byte map:".to_string());
+    let enum_segment = BitSegment {
+        name: name.to_string(),
+        ty: name.to_string(),
+        start: 0,
+        end: total_bits.saturating_sub(1),
+    };
+    preview_lines.extend(render_packed_byte_map(total_bits, &[enum_segment]));
+    preview_lines.push("* = Free Bits".to_string());
 
     let preview_text = preview_lines.join("\n");
     let preview_doc = LitStr::new(
@@ -453,10 +535,20 @@ fn expand_bitflate(mut item: ItemStruct, opts: BitflateOptions) -> proc_macro2::
             used_bytes, free_bytes
         ));
         ascii_layout.push_str("Layout map (in memory order):\n");
-        let max_index = computed_size.saturating_sub(1);
-        let idx_width = max_index.to_string().len().max(1);
-        let bytes_width = computed_size.to_string().len().max(1);
-        for row in &rows {
+        let rendered_names: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                if row.padding {
+                    row.name.clone()
+                } else if row.ty.is_empty() {
+                    row.name.clone()
+                } else {
+                    format!("{}: {}", row.name, row.ty)
+                }
+            })
+            .collect();
+        let mut map_rows = Vec::new();
+        for (row, name_part) in rows.iter().zip(rendered_names.iter()) {
             if row.unsupported {
                 ascii_layout.push_str(&format!(
                     "- {:<16} <layout preview unavailable>\n",
@@ -464,36 +556,26 @@ fn expand_bitflate(mut item: ItemStruct, opts: BitflateOptions) -> proc_macro2::
                 ));
                 continue;
             }
-            let range = format!(
-                "[{:>w$}..,{:>w$}]",
-                row.start,
-                row.end,
-                w = idx_width
-            );
-            let name_part = if row.padding {
-                row.name.clone()
-            } else if row.ty.is_empty() {
-                row.name.clone()
-            } else {
-                format!("{}: {}", row.name, row.ty)
-            };
             let bits_suffix = row
                 .bits_opt
                 .map(|_| {
                     format!(
-                        "  [{:>bw$}..,{:>bw$}]",
-                        row.bit_start,
-                        row.bit_end,
-                        bw = idx_width + 2
+                        "  [{}..,{}]",
+                        row.bit_start, row.bit_end
                     )
                 })
                 .unwrap_or_default();
-            ascii_layout.push_str(&format!(
-                "- {range} {:<20} {:>bw$} bytes{bits_suffix}\n",
-                name_part,
-                row.bytes,
-                bw = bytes_width
-            ));
+            map_rows.push(LayoutLine {
+                range: format!("[{}..,{}]", row.start, row.end),
+                label: name_part.clone(),
+                count: row.bytes,
+                unit: "by".to_string(),
+                suffix: bits_suffix,
+            });
+        }
+        for line in render_layout_lines(&map_rows) {
+            ascii_layout.push_str(&line);
+            ascii_layout.push('\n');
         }
         ascii_layout.push_str("\nByte map:\n");
         for (idx, owner) in byte_owners.iter().enumerate() {
@@ -810,4 +892,76 @@ fn has_repr_c(attrs: &[Attribute]) -> bool {
                 })
                 .unwrap_or(false)
         })
+}
+
+struct LayoutLine {
+    range: String,
+    label: String,
+    count: usize,
+    unit: String,
+    suffix: String,
+}
+
+fn render_layout_lines(rows: &[LayoutLine]) -> Vec<String> {
+    let range_width = rows.iter().map(|r| r.range.len()).max().unwrap_or(1);
+    let label_width = rows.iter().map(|r| r.label.len()).max().unwrap_or(1);
+    let count_width = rows
+        .iter()
+        .map(|r| r.count.to_string().len())
+        .max()
+        .unwrap_or(1);
+    rows.iter()
+        .map(|row| {
+            format!(
+                "- {range:<rw$}  {label:<lw$}  {count:>cw$} {unit}{suffix}",
+                range = row.range,
+                label = row.label,
+                count = row.count,
+                unit = row.unit,
+                suffix = row.suffix,
+                rw = range_width,
+                lw = label_width,
+                cw = count_width
+            )
+        })
+        .collect()
+}
+
+struct BitSegment {
+    name: String,
+    ty: String,
+    start: usize,
+    end: usize,
+}
+
+fn render_packed_byte_map(total_bits: usize, segments: &[BitSegment]) -> Vec<String> {
+    let total_bytes = total_bits.div_ceil(8);
+    let mut out = Vec::with_capacity(total_bytes);
+    for byte_idx in 0..total_bytes {
+        let byte_start = byte_idx * 8;
+        let byte_end = byte_start + 7;
+        let mut parts: Vec<String> = Vec::new();
+        for seg in segments {
+            if seg.end < byte_start || seg.start > byte_end {
+                continue;
+            }
+            let lo = seg.start.max(byte_start);
+            let hi = seg.end.min(byte_end);
+            parts.push(format!("{}: {}[{}..,{}]", seg.name, seg.ty, lo, hi));
+        }
+        let used_in_byte = if byte_start >= total_bits {
+            0
+        } else {
+            (total_bits.min(byte_end + 1)).saturating_sub(byte_start)
+        };
+        if used_in_byte < 8 {
+            let free_start = byte_start + used_in_byte;
+            parts.push(format!("<free>*[{}..,{}]", free_start, byte_end));
+        }
+        if parts.is_empty() {
+            parts.push("<free>*".to_string());
+        }
+        out.push(format!("{}: {}", byte_idx, parts.join(", ")));
+    }
+    out
 }
