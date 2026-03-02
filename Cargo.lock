@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "bitflate-rs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bilge",
  "bitflate-rs-macros",
